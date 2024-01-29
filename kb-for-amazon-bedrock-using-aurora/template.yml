@@ -1,0 +1,330 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+
+  01ApplicationName:
+    Description: Please specify the application name of the resource
+    Type: String
+    Default: test
+
+  02VpcCIDR:
+    Description: Please enter the IP range (CIDR notation) for this VPC
+    Type: String
+    Default: 192.168.0.0/24
+
+  03PrivateSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 192.168.0.0/28
+
+  04PrivateSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 192.168.0.16/28
+
+Resources:
+
+  ######################################
+  ##
+  ## VPC
+  ##
+  ######################################
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref 02VpcCIDR
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${01ApplicationName}-vpc
+
+  ######################################
+  ##
+  ## Private Subnet
+  ##
+  ######################################
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Ref 03PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${01ApplicationName}-private-subnet-1a
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub ${AWS::Region}c
+      CidrBlock: !Ref 04PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${01ApplicationName}-private-subnet-1c
+
+  ######################################
+  ##
+  ## Route Table for Private Subnet
+  ##
+  ######################################
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub rtb-${01ApplicationName}-private-subnet
+
+  PrivateSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
+
+  ######################################
+  ##
+  ## DB Subnet Group
+  ##
+  ######################################
+
+  DBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: description
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+
+  ######################################
+  ##
+  ## S3 Bucket for Knowledge Base
+  ##
+  ######################################
+
+  KnowledgeBaseDataSourcesBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketName: !Sub ${01ApplicationName}-knowledge-base-data-sources-bucket-${AWS::AccountId}
+
+  ######################################
+  ##
+  ## Secret for Aurora
+  ##
+  ######################################
+
+  SecretForAurora:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: database-user-for-bedrock-secret
+      Description: "This is a secret."
+      SecretString: '{
+          "username":"bedrock_user",
+          "password":"P@ssword123"
+        }'
+
+  ######################################
+  ##
+  ## Aurora
+  ##
+  ######################################
+
+  AuroraCluster:
+    Type: 'AWS::RDS::DBCluster'
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      DatabaseName: rag
+      Engine: aurora-postgresql
+      EngineVersion: 15.5
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      MasterUsername: postgresql
+      ManageMasterUserPassword: true
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 1.0
+      EnableHttpEndpoint: true
+
+  AuroraDBInstance:
+    Type: 'AWS::RDS::DBInstance'
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      Engine: aurora-postgresql
+      DBInstanceClass: db.serverless
+      DBClusterIdentifier: !Ref AuroraCluster
+
+  ######################################
+  ##
+  ## IAM Role for Knowledge Base
+  ##
+  ######################################
+
+  IAMRoleForKnowledgeBase:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub AmazonBedrockExecutionRoleForKnowledgeBase_${01ApplicationName}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - bedrock.amazonaws.com
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  - !Sub ${AWS::AccountId}
+              ArnLike:
+                aws:SourceArn:
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:knowledge-base/*"
+      Policies:
+        - PolicyName: AmazonBedrockRDSClusterPolicyForKnowledgeBase
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBClusters
+                  - rds-data:BatchExecuteStatement
+                  - rds-data:ExecuteStatement
+                Resource: !GetAtt AuroraCluster.DBClusterArn
+        - PolicyName: AmazonBedrockS3PolicyForKnowledgeBase
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt KnowledgeBaseDataSourcesBucket.Arn
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount:
+                      - !Sub ${AWS::AccountId}
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "${KnowledgeBaseDataSourcesBucket.Arn}/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount:
+                      - !Sub ${AWS::AccountId}
+        - PolicyName: AmazonBedrockSecretsPolicyForKnowledgeBase
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref SecretForAurora
+        - PolicyName: AmazonBedrockFoundationModelPolicyForKnowledgeBase
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.titan-embed-text-v1
+
+  ######################################
+  ##
+  ## IAM Role for Scheduler
+  ##
+  ######################################
+
+  SchedulerAuroraStopStartRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - scheduler.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: SchedulerAuroraStopStartPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:StartDBCluster
+                  - rds:StopDBCluster
+                Resource:
+                  - "*"
+
+  ######################################
+  ##
+  ## Scheduler for Aurora
+  ##
+  ######################################
+
+  ScheduleAuroraSart:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub Aurora-Start-${AuroraCluster}
+      Description: Start Aurora Cluster
+      ScheduleExpression: cron(0 8 * * ? *)
+      ScheduleExpressionTimezone: Japan
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:rds:startDBCluster
+        Input: !Sub |-
+          {
+            "DbClusterIdentifier": "${AuroraCluster}"
+          }
+        RoleArn: !GetAtt SchedulerAuroraStopStartRole.Arn
+
+  ScheduleAuroraStop:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub Aurora-Stop-${AuroraCluster}
+      Description: Start Aurora Cluster
+      ScheduleExpression: cron(0 20 * * ? *)
+      ScheduleExpressionTimezone: Japan
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:rds:stopDBCluster
+        Input: !Sub |-
+          {
+            "DbClusterIdentifier": "${AuroraCluster}"
+          }
+        RoleArn: !GetAtt SchedulerAuroraStopStartRole.Arn
+
+Outputs:
+  TestAuroraClusterArn:
+    Value: !GetAtt AuroraCluster.DBClusterArn
+  TestAuroraAdminUserSecretArn:
+    Value: !GetAtt AuroraCluster.MasterUserSecret.SecretArn
+  TestIAMRoleForKnowledgeBase:
+    Value: !GetAtt IAMRoleForKnowledgeBase.Arn
+  TestS3Bucket:
+    Value: !Ref KnowledgeBaseDataSourcesBucket
+  TestAuroraBedrockUserSecretArn:
+    Value: !Ref SecretForAurora
