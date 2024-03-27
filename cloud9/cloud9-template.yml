@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Cloud9 For Serverworks Standard Development Environment
+
+#####################################################
+# Parameters
+#####################################################
+Parameters:
+  SystemName:
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9-]*'
+    Default: dev-env
+
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - c5.large
+      - t3.large
+      - m5.large
+    Description: Enter t3.small, t3.medium, c5.large, t3.large, , or m5.large. Default is t3.medium.
+
+  # PrmIAMUserName:
+  #   Type: String
+  #   Default: administrator
+
+
+#####################################################
+# Resources
+#####################################################
+Resources:
+
+  #--------------------------------------------------
+  # VPC
+  #--------------------------------------------------
+
+  DEVENVVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 192.168.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-vpc
+
+  #--------------------------------------------------
+  # PublicSubnet
+  #--------------------------------------------------
+
+  DEVENVPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DEVENVVPC
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: 192.168.0.0/27
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-public-subnet-1a
+
+  #--------------------------------------------------
+  # IGW
+  #--------------------------------------------------
+
+  DEVENVInternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-igw
+
+  DEVENVAttachGateway:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      InternetGatewayId: !Ref DEVENVInternetGateway
+      VpcId: !Ref DEVENVVPC
+
+  #--------------------------------------------------
+  # RouteTable for PublicSubnet
+  #--------------------------------------------------
+
+  DEVENVPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DEVENVVPC
+      Tags:
+        - Key: Name
+          Value: !Sub rtb-${SystemName}-public-subnet
+
+  DEVENVDefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DEVENVPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref DEVENVInternetGateway
+
+  DEVENVPublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref DEVENVPublicRouteTable
+      SubnetId: !Ref DEVENVPublicSubnet1
+
+  #--------------------------------------------------
+  # Cloud9
+  #--------------------------------------------------
+  DEVENVCloud9:
+    Type: AWS::Cloud9::EnvironmentEC2
+    Properties:
+      AutomaticStopTimeMinutes: 30
+      ConnectionType: CONNECT_SSM
+      Description: !Sub ${SystemName}-cloud9
+      ImageId: "amazonlinux-2023-x86_64"
+      InstanceType: !Ref InstanceType
+      Name: !Sub ${SystemName}-cloud9
+      SubnetId: !Ref DEVENVPublicSubnet1
+
+Outputs:
+  DEVENVCloud9:
+    Value: !Ref DEVENVCloud9
