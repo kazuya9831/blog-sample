@@ -1,0 +1,17 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "alb-cognito-flask"
+resolve_s3 = true
+s3_prefix = "alb-cognito-flask"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+    "ApplicationName=alb-cognito-flask",
+    "AllowSourceIp=xxx.xxx.xxx.xxx/xx",
+    "DNSNameForALB=xxxx",
+    "ACMArn=xxxxx",
+    "VpcCIDR=192.168.0.0/24",
+    "PublicSubnet1CIDR=192.168.0.0/27",
+    "PublicSubnet2CIDR=192.168.0.32/27"
+]
+image_repositories = []

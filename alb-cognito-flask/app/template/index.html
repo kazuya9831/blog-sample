@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <link href="https://unpkg.com/tailwindcss@^2/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-8">
+
+<h3 class="text-2xl font-bold mb-1">
+  Username: {{ detail_headers["username"] }} <br>
+  GroupIds: {{ detail_headers["group_ids"] }} <br>
+</h3>
+
+<div class="bg-white shadow-md rounded-lg p-6 mb-8">
+  <h2 class="text-2xl font-bold mb-4">Request Headers</h2>
+  <pre class="text-sm text-gray-600 overflow-x-auto">{{ request.headers }}</pre>
+</div>
+
+<div class="bg-white shadow-md rounded-lg p-6 mb-8">
+  <h2 class="text-2xl font-bold mb-4">X-Amzn-Oidc-Accesstoken</h2>
+  <p class="text-gray-700">{{ detail_headers["X-Amzn-Oidc-Accesstoken"] }}</p>
+</div>
+
+<div class="bg-white shadow-md rounded-lg p-6 mb-8">
+  <h2 class="text-2xl font-bold mb-4">X-Amzn-Oidc-Accesstoken(decode)</h2>
+  <pre class="text-sm text-gray-600 overflow-x-auto">{{ detail_headers["decode_access_token"] }}</pre>
+</div>
+
+<div class="bg-white shadow-md rounded-lg p-6 mb-8">
+  <h2 class="text-2xl font-bold mb-4">X-Amzn-Oidc-Data</h2>
+  <p class="text-gray-700">{{ detail_headers["X-Amzn-Oidc-Data"] }}</p>
+</div>
+
+<div class="bg-white shadow-md rounded-lg p-6 mb-8">
+  <h2 class="text-2xl font-bold mb-4">X-Amzn-Oidc-Data(decode)</h2>
+  <pre class="text-sm text-gray-600 overflow-x-auto">{{ detail_headers["decode_oidc_data"] }}</pre>
+</div>
+
+
+<div class="bg-white shadow-md rounded-lg p-6 mb-8">
+  <h2 class="text-2xl font-bold mb-4">X-Amzn-Request-Context</h2>
+  <pre class="text-sm text-gray-600 overflow-x-auto">{{ detail_headers["X-Amzn-Request-Context"] }}</pre>
+</div>
+
+<div class="bg-white shadow-md rounded-lg p-6 mb-8">
+  <h2 class="text-2xl font-bold mb-4">X-Amzn-Lambda-Context</h2>
+  <pre class="text-sm text-gray-600 overflow-x-auto">{{ detail_headers["X-Amzn-Lambda-Context"] }}</pre>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,297 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Configuration
+      Parameters:
+      - ApplicationName
+      - AllowSourceIp
+      - DNSNameForALB
+      - ACMArn
+      - VpcCIDR
+      - PublicSubnet1CIDR
+      - PublicSubnet2CIDR
+
+Parameters:
+  ApplicationName:
+    Description: Please specify the application name of the resource
+    Type: String
+    Default: text-analysis
+
+  AllowSourceIp:
+    Description: Required. Please specify the Ip to allow access to the ai text search
+      service.
+    Type: String
+
+  DNSNameForALB:
+    Description: Please specify the application name of the resource
+    Type: String
+    Default: example.com
+
+  ACMArn:
+    Description: Required. Please specify the ACM Arn.
+    Type: String
+
+  VpcCIDR:
+    Description: Please specify the application name of the resource
+    Type: String
+    Default: 192.168.0.0/24
+
+  PublicSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
+    Type: String
+    Default: 192.168.0.0/27
+
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
+    Type: String
+    Default: 192.168.0.32/27
+
+Resources:
+
+  ###################################################
+  ## VPC
+  ###################################################
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCIDR
+      Tags:
+      - Key: Name
+        Value: !Sub ${ApplicationName}-vpc
+
+  ###################################################
+  ## PublicSubnet
+  ###################################################
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Ref PublicSubnet1CIDR
+      Tags:
+      - Key: Name
+        Value: !Sub ${ApplicationName}-public-subnet-1a
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      AvailabilityZone: !Sub ${AWS::Region}c
+      CidrBlock: !Ref PublicSubnet2CIDR
+      Tags:
+      - Key: Name
+        Value: !Sub ${ApplicationName}-public-subnet-1c
+
+  ###################################################
+  ## IGW
+  ###################################################
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: !Sub ${ApplicationName}-igw
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  ###################################################
+  ## RouteTable for PublicSubnet
+  ###################################################
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+      - Key: Name
+        Value: !Sub rtb-${ApplicationName}-public-subnet
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  ###################################################
+  ## Security Group for ALB
+  ###################################################
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${ApplicationName}-alb-sg
+      GroupDescription: Security group for alb
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: !Ref AllowSourceIp
+        Description: Allow HTTP traffic from the alb
+      SecurityGroupEgress:
+      - IpProtocol: -1
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: '0.0.0.0/0'
+        Description: Allow all outbound traffic
+
+  ###################################################
+  ## ALB
+  ###################################################
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${ApplicationName}-alb
+      Scheme: internet-facing
+      SecurityGroups:
+      - !Ref ALBSecurityGroup
+      Subnets:
+      - !Ref PublicSubnet1
+      - !Ref PublicSubnet2
+      Type: application
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${ApplicationName}-tg
+      TargetType: lambda
+      Targets:
+      - Id: !GetAtt Lambda.Arn
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+      - CertificateArn: !Ref ACMArn
+      DefaultActions:
+        - AuthenticateCognitoConfig:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
+            UserPoolClientId: !Ref CognitoUserPoolClient
+            UserPoolDomain: !Ref CognitoUserPoolDomain
+            SessionTimeout: 86400 # 1Day (default: 7Days)
+          Order: 1
+          Type: "authenticate-cognito"
+        - TargetGroupArn: !Ref 'TargetGroup'
+          Order: 2
+          Type: "forward"
+
+  ###################################################
+  ## Lambda
+  ###################################################
+
+  LambdaLayer:
+    Type: AWS::Serverless::LayerVersion
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LayerName: !Sub ${ApplicationName}-lambda-layer
+      Description: Layer description
+      ContentUri: layers
+      CompatibleRuntimes:
+        - python3.11
+    Metadata:
+      BuildMethod: python3.11
+
+  Lambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.11
+      Architectures:
+      - x86_64
+      CodeUri: app
+      FunctionName: !Sub ${ApplicationName}-lambda
+      Timeout: 180
+      MemorySize: 4096
+      Handler: run.sh
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPool
+          COGNITO_CLIENT_ID: !Ref CognitoUserPoolClient
+      Layers:
+      - !Ref LambdaLayer
+      - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:19
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt Lambda.Arn
+      Action: lambda:InvokeFunction
+      Principal: elasticloadbalancing.amazonaws.com
+
+  ###################################################
+  ## Cognito
+  ###################################################
+
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      UserPoolName: !Sub "${ApplicationName}-cognito-user-pool"
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "${ApplicationName}-cognito-app-client"
+      UserPoolId: !Ref CognitoUserPool
+      GenerateSecret: true
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - !Sub https://${DNSNameForALB}/oauth2/idpresponse
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+      SupportedIdentityProviders:
+        - COGNITO
+
+  CognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      # ドメイン名は重複を避けるため、「ApplicationName」-「StackIdの-区切りの末尾」で設定
+      # StackIdの例
+      #  arn:aws:cloudformation:us-west-2:123456789012:stack/teststack/51af3dc0-da77-11e4-872e-1234567db123
+      Domain: !Join
+        - "-"
+        - - "alb-flask"
+          - !Select
+            - 4
+            - !Split
+              - "-"
+              - !Select
+                - 2
+                - !Split
+                  - "/"
+                  - !Sub "${AWS::StackId}"
+      UserPoolId: !Ref CognitoUserPool
