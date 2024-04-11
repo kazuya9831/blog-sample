@@ -295,3 +295,16 @@ Resources:
                   - "/"
                   - !Sub "${AWS::StackId}"
       UserPoolId: !Ref CognitoUserPool
+
+Outputs:
+  ALBFQDN:
+    Description: The FQDN of the ALB
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+
+  DNSNameForALB:
+    Description: The DNS name for the ALB
+    Value: !Ref DNSNameForALB
+
+  CognitoUserPoolId:
+    Description: The ID of the Cognito User Pool
+    Value: !Ref CognitoUserPool
