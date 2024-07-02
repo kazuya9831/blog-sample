@@ -1,0 +1,12 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "sample-api-sqs-lambda"
+resolve_s3 = true
+s3_prefix = "sample-api-sqs-lambda"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = [
+    "pServiceName=sample",
+    "pEnvironment=dev"
+]
+image_repositories = []

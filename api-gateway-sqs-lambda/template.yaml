@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: REST API with SQS Lambda
+
+Parameters:
+  pServiceName:
+    Type: String
+    Default: sample
+  pEnvironment:
+    Type: String
+    Default: dev
+
+Resources:
+  ###################################################
+  ## API Gateway
+  ###################################################
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref pEnvironment
+      EndpointConfiguration:
+        Type: "REGIONAL"
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: !Sub ${pServiceName}-${pEnvironment}-api-gateway
+        paths:
+          "/":
+            post:
+              responses:
+                "200":
+                  description: "200 response"
+              x-amazon-apigateway-integration:
+                credentials: !GetAtt ApiGatewayRole.Arn
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:sqs:path/${AWS::AccountId}/${pServiceName}-${pEnvironment}-sqs"
+                httpMethod: "POST"
+                passthroughBehavior: "WHEN_NO_TEMPLATES"
+                type: "aws"
+                requestParameters:
+                  integration.request.header.Content-Type: "'application/x-www-form-urlencoded'"
+                requestTemplates:
+                  application/json: "Action=SendMessage&MessageBody=$input.body"
+                responses:
+                  default:
+                    statusCode: "200"
+
+  ###################################################
+  ## API Gateway SQS Execution Role
+  ###################################################
+  ApiGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pServiceName}-${pEnvironment}-api-gateway-role
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ApiQueuePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt ApiQueue.Arn
+
+  ###################################################
+  ## SQS Queue
+  ###################################################
+  ApiQueue:
+    Type: AWS::SQS::Queue
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      QueueName: !Sub ${pServiceName}-${pEnvironment}-sqs
+      VisibilityTimeout: 60
+      DelaySeconds: 0
+      ReceiveMessageWaitTimeSeconds: 20
+      MessageRetentionPeriod: 1209600
+      MaximumMessageSize: 10240
+      SqsManagedSseEnabled: true
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt "ApiQueueDLQ.Arn"
+        maxReceiveCount: 3
+
+  ###################################################
+  ## Dead Letter Queue
+  ###################################################
+  ApiQueueDLQ:
+    Type: AWS::SQS::Queue
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      QueueName: !Sub ${pServiceName}-${pEnvironment}-dead-letter-sqs
+      VisibilityTimeout: 60
+      DelaySeconds: 0
+      ReceiveMessageWaitTimeSeconds: 20
+      MessageRetentionPeriod: 1209600
+      MaximumMessageSize: 10240
+      SqsManagedSseEnabled: true
+
+  ###################################################
+  ## Lambda SQS Consumer
+  ###################################################
+  ConsumeQueueFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${pServiceName}-${pEnvironment}-lambda"
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Architectures:
+        - x86_64
+      MemorySize: 128
+      Timeout: 60
+      Events:
+        ApiQueueEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ApiQueue.Arn
+            BatchSize: 10
+      Policies:
+        - SQSPollerPolicy:
+            QueueName: !GetAtt ApiQueue.QueueName
+
+Outputs:
+  ApiGatewayUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${pEnvironment}"
