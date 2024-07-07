@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template
+
+Parameters:
+  pApplicationName:
+    Type: String
+    Default: sample
+  pEnvironment:
+    Type: String
+    Default: dev
+  pCodeCommitRepoName:
+    Type: String
+    Default: sample-codecommit
+  pBranchName:
+    Type: String
+    Default: main
+  pPipelineAccount:
+    Type: String
+    Default: 222222222222
+
+Resources:
+
+  ###################################################
+  ## IAM Role for EventBridge Rule
+  ###################################################
+
+  EventBridgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pApplicationName}-send-event-to-${pEnvironment}-account-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${pApplicationName}-send-event-to-${pEnvironment}-account-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${pPipelineAccount}:event-bus/${pApplicationName}-${pEnvironment}-recieve-event-from-repo-account-custom-bus
+
+  ###################################################
+  ## EventBridge Rule for Sending Event to Pipeline Account
+  ###################################################
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${pApplicationName}-send-event-to-${pEnvironment}-account-rule
+      EventPattern: !Sub |
+        {
+          "source":["aws.codecommit"],
+          "detail-type":["CodeCommit Repository State Change"],
+          "resources":[
+            "arn:${AWS::Partition}:codecommit:${AWS::Region}:${AWS::AccountId}:${pCodeCommitRepoName}"
+          ],
+          "detail":
+          {
+            "event":["referenceCreated","referenceUpdated"],
+            "referenceType":["branch"],
+            "referenceName":["${pBranchName}"]
+          }
+        }
+      State: ENABLED
+      EventBusName: default
+      Targets:
+        - Id: !Sub ${pApplicationName}-send-event-to-${pEnvironment}-account-rule-target
+          Arn: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${pPipelineAccount}:event-bus/${pApplicationName}-${pEnvironment}-recieve-event-from-repo-account-custom-bus
+          RoleArn: !GetAtt EventBridgeRole.Arn
+
+  ###################################################
+  ## IAM Role for CodePipeline to Assume
+  ###################################################
+
+  CodePipelineAssumeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pApplicationName}-${pEnvironment}-codepipeline-assume-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${pPipelineAccount}:root
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub ${pApplicationName}-${pEnvironment}-codepipeline-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: "CodeCommitFullAccess"
+                Effect: Allow
+                Action:
+                  - "codecommit:GetBranch"
+                  - "codecommit:GetCommit"
+                  - "codecommit:UploadArchive"
+                  - "codecommit:GetUploadArchiveStatus"
+                  - "codecommit:CancelUploadArchive"
+                Resource: !Sub arn:${AWS::Partition}:codecommit:${AWS::Region}:${AWS::AccountId}:${pCodeCommitRepoName}
+              - Sid: "KmsScopeAccess"
+                Effect: Allow
+                Action:
+                  - "kms:DescribeKey"
+                  - "kms:GenerateDataKey*"
+                  - "kms:Encrypt"
+                  - "kms:ReEncrypt*"
+                  - "kms:Decrypt"
+                Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${pPipelineAccount}:key/*
+              - Sid: "S3ScopeAccess"
+                Effect: Allow
+                Action:
+                  - "s3:GetObject"
+                  - "s3:PutObject"
+                  - "s3:PutObjectAcl"
+                Resource: !Sub arn:${AWS::Partition}:s3:::${pApplicationName}-${pEnvironment}-codepipeline-artifacts-${pPipelineAccount}/*
