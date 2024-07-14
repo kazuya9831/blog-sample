@@ -1,0 +1,16 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "image-search"
+resolve_s3 = true
+s3_prefix = "image-search"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+    "01ApplicationName=image-search",
+    "02VpcCIDR=192.168.0.0/24",
+    "03PublicSubnet1CIDR=192.168.0.0/27",
+    "04PublicSubnet2CIDR=192.168.0.32/27",
+    "05PrivateSubnet1CIDR=192.168.0.64/27",
+    "06PrivateSubnet2CIDR=192.168.0.96/27"
+]
+image_repositories = []

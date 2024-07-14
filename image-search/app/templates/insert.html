@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>データの挿入</title>
+</head>
+<body>
+    <a href="{{ url_for('index') }}">戻る</a>
+    <h1>画像データの挿入</h1>
+    <form action="{{ url_for('insert') }}" method="post" enctype="multipart/form-data">
+        <input type="file" name="file">
+        <input type="submit" value="Upload">
+    </form>
+</body>
+</html>
