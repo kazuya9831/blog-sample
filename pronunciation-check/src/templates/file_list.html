@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>分析結果の一覧</title>
+</head>
+<body>
+    <h1>分析結果の一覧</h1>
+    <table>
+        <tr>
+            <th>File Name</th>
+            <th>Last Modified</th>
+        </tr>
+        {% if objects %}
+        {% for obj in objects %}
+        <tr>
+            <td><a href="{{ url_for('display_result', file_path=obj.key) }}">{{ obj.key }}</a></td>
+            <td>{{ obj.last_modified.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+        </tr>
+        {% endfor %}
+        {% endif %}
+    </table>
+</body>
+</html>

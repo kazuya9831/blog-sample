@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>発音チェックアプリ</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .container {
+            max-width: 800px;
+            margin-top: 50px;
+        }
+        .recording-time {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .result-container {
+            margin-top: 20px;
+        }
+        .spinner-container {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .spinner-container span {
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>発音チェックアプリ</h1>
+        <div>
+            <button id="recordButton" class="btn btn-primary">録音開始</button>
+            <button id="stopButton" class="btn btn-warning" disabled>録音停止</button>
+            <button id="uploadButton" class="btn btn-success" disabled>アップロード</button>
+        </div>
+        <p class="recording-time">録音時間: <span id="recordingTime">0:00</span></p>
+        <div>
+            <audio id="audioPlayback" controls></audio>
+        </div>
+        <div><a href="{{ url_for('list_results') }}">過去の評価結果</a></div>
+        <div class="spinner-container text-center" id="loadingSpinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="sr-only">Loading...</span>
+            </div>
+            <span>音声データを解析中です。画面はこのままでお待ちください。</span>
+        </div>
+        <div id="resultContainer" class="result-container"></div>
+        <h2 class="mt-5">トークスクリプト</h2>
+        <button class="btn btn-info" onclick="toggleEdit()">Edit</button>
+        <div id="editArea" style="display:none;" class="mt-3">
+            <form action="{{ url_for('edit_talk_script') }}" method="post">
+                <textarea name="text" rows="10" cols="100" class="form-control">{{ talk_script }}</textarea><br>
+                <input type="submit" class="btn btn-primary" value="Save">
+            </form>
+        </div>
+        <div id="displayArea" class="mt-3">
+            {% if talk_script %}
+            <p>{{ talk_script | replace('\n', '<br>')|safe }}</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let startTime;
+        let recordingInterval;
+        let audioBlob;
+
+        function updateRecordingTime() {
+            const now = Date.now();
+            const elapsedTime = Math.floor((now - startTime) / 1000);
+            const minutes = Math.floor(elapsedTime / 60);
+            const seconds = elapsedTime % 60;
+            document.getElementById('recordingTime').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        document.getElementById('recordButton').addEventListener('click', async () => {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.start();
+            startTime = new Date();  // 録音開始時刻を取得
+            recordingInterval = setInterval(updateRecordingTime, 1000);
+
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                clearInterval(recordingInterval);
+                audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                audioChunks = [];
+                const audioUrl = URL.createObjectURL(audioBlob);
+                document.getElementById('audioPlayback').src = audioUrl;
+
+                document.getElementById('uploadButton').disabled = false;
+            };
+
+            document.getElementById('recordButton').disabled = true;
+            document.getElementById('stopButton').disabled = false;
+        });
+
+        document.getElementById('stopButton').addEventListener('click', () => {
+            mediaRecorder.stop();
+            document.getElementById('recordButton').disabled = false;
+            document.getElementById('stopButton').disabled = true;
+        });
+
+        document.getElementById('uploadButton').addEventListener('click', async () => {
+            const endTime = new Date();
+            const elapsedTime = Math.floor((endTime - startTime) / 1000);
+            const durationMinutes = Math.floor(elapsedTime / 60);
+            const durationSeconds = elapsedTime % 60;
+            const formattedTime = `${durationMinutes}m${durationSeconds}s`;
+            const formattedStartTime = formatDate(startTime);
+            const fileName = `recording_${formattedStartTime}_${formattedTime}.wav`;
+
+            // 音声データをFlaskサーバーに送信
+            const formData = new FormData();
+            formData.append('audio_file', audioBlob, fileName);
+
+            // ボタンを無効にして二重送信を防止
+            document.getElementById('uploadButton').disabled = true;
+
+            // 処理中メッセージとスピナーを表示
+            const resultContainer = document.getElementById('resultContainer');
+            document.getElementById('loadingSpinner').style.display = 'flex';
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.text();
+                resultContainer.innerHTML = result;
+            } catch (error) {
+                resultContainer.innerHTML = 'アップロード中にエラーが発生しました。';
+            } finally {
+                // ボタンを再度有効にしてスピナーを非表示にする
+                document.getElementById('uploadButton').disabled = false;
+                document.getElementById('loadingSpinner').style.display = 'none';
+            }
+        });
+
+        function formatDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
+            return `${year}${month}${day}_${hours}${minutes}${seconds}`;
+        }
+
+        function toggleEdit() {
+            var displayArea = document.getElementById('displayArea');
+            var editArea = document.getElementById('editArea');
+            if (editArea.style.display === 'none') {
+                editArea.style.display = 'block';
+                displayArea.style.display = 'none';
+            } else {
+                editArea.style.display = 'none';
+                displayArea.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+</html>

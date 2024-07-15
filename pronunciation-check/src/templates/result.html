@@ -1,0 +1,13 @@
+<h2>文字起こし結果</h2>
+{% if transcription_result %}
+<p>{{ transcription_result | replace('\n', '<br>')|safe }}</p>
+{% else %}
+<p>文字起こしの結果がありません。</p>
+{% endif %}
+
+<h2>生成AIによる評価の結果</h2>
+{% if evaluation_result %}
+<p>{{ evaluation_result | replace('\n', '<br>')|safe }}</p>
+{% else %}
+<p>生成AIによる評価の結果がありません。</p>
+{% endif %}

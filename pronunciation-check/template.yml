@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Configuration
+        Parameters:
+          - ApplicationName
+
+Parameters:
+  ApplicationName:
+    Description: Please specify the application name of the resource
+    Type: String
+
+Resources:
+  ###################################################
+  ## Lambda
+  ###################################################
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${ApplicationName}-data-s3-bucket-${AWS::AccountId}
+
+  LambdaLayer:
+    Type: AWS::Serverless::LayerVersion
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LayerName: !Sub ${ApplicationName}-lambda-layer
+      Description: Layer description
+      ContentUri: layers
+      CompatibleRuntimes:
+        - python3.12
+    Metadata:
+      BuildMethod: python3.12
+
+  Lambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      CodeUri: src
+      FunctionName: !Sub ${ApplicationName}-lambda
+      Timeout: 180
+      MemorySize: 4096
+      Handler: run.sh
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          S3_BUCKET: !Ref S3Bucket
+      Policies:
+        - S3FullAccessPolicy:
+            BucketName: !Ref S3Bucket
+        - Statement:
+            - Sid: "BedrockScopedAccess"
+              Effect: "Allow"
+              Action:
+                - "bedrock:InvokeModel"
+              Resource:
+                - "*"
+            - Sid: "TranscribeScopedAccess"
+              Effect: "Allow"
+              Action:
+                - "transcribe:StartTranscriptionJob"
+                - "transcribe:GetTranscriptionJob"
+              Resource:
+                - "*"
+      Layers:
+        - !Ref LambdaLayer
+        - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:19
+      FunctionUrlConfig:
+        AuthType: NONE
+
+Outputs:
+  LambdaFunctionUrl:
+    Description: "Lambda Function URL"
+    Value: !GetAtt LambdaUrl.FunctionUrl
