@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  ApplicationName:
+    Description: Please specify the application name of the resource
+    Type: String
+
+  GlueDatabaseName:
+    Description: Please specify the Glue Database Name
+    Type: String
+
+  GlueTableName:
+    Description: Please specify the Glue Table Name
+    Type: String
+
+Resources:
+
+  ###################################################
+  ## DynamoDB
+  ###################################################
+
+  ChatHistoryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub "${ApplicationName}-chat-history-table"
+      AttributeDefinitions:
+        - AttributeName: ChatId
+          AttributeType: S
+        - AttributeName: ConversationAt
+          AttributeType: N
+      KeySchema:
+        - AttributeName: ChatId
+          KeyType: HASH
+        - AttributeName: ConversationAt
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  ######################################
+  ## S3 Bucket for Athena History
+  ######################################
+  S3BucketForAthenaHistory:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "${ApplicationName}-athena-query-results-${AWS::AccountId}"
+      LifecycleConfiguration:
+        Rules:
+          - Id: AthenaHistoryLifeCycle
+            ExpirationInDays: 7
+            Status: Enabled
+
+  ######################################
+  ## S3 Bucket for Export DynamoDB
+  ######################################
+  S3BucketForExportDynamoDB:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "${ApplicationName}-export-dynamodb-${AWS::AccountId}"
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .json.gz
+            Function: !GetAtt AthenaTableUpdateLambda.Arn
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExportedDynamoDBLifeCycle
+            ExpirationInDays: 7
+            Status: Enabled
+
+  ######################################
+  ## Lambda for Update Athena Table
+  ######################################
+
+  AthenaTableUpdateLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      CodeUri: src
+      Handler: lambda_function.lambda_handler
+      Timeout: 60
+      MemorySize: 128
+      FunctionName: !Sub "${ApplicationName}-athena-table-update-lambda"
+      Environment:
+        Variables:
+          GLUE_DATABASE: !Ref GlueDatabaseName
+          GLUE_TABLE: !Ref GlueTableName
+          QUERY_OUTPUT_S3_BUCKET: !Sub "s3://${S3BucketForAthenaHistory}"
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref S3BucketForAthenaHistory
+        - Statement:
+          - Sid: "UpdateAthenaTable"
+            Effect: "Allow"
+            Action:
+              - "athena:StartQueryExecution"
+              - "athena:GetQueryExecution"
+              - "glue:GetDatabase"
+              - "glue:GetTable"
+              - "glue:GetPartitions"
+              - "glue:UpdateTable"
+            Resource:
+              -  "*"
+
+  AthenaTableUpdateLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt AthenaTableUpdateLambda.Arn
+      Principal: "s3.amazonaws.com"
+
+  ######################################
+  ## IAM Role for Scheduler
+  ######################################
+  SchedulerRole:
+    Type: "AWS::IAM::Role"
+    DeletionPolicy: "Delete"
+    Properties:
+      RoleName: !Sub "${ApplicationName}-export-dynamodb-eventbridge-schedule-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "scheduler.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      Policies:
+        - PolicyName: !Sub "${ApplicationName}-export-dynamodb-eventbridge-schedule-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "ExportFromDynamoDB"
+                Effect: "Allow"
+                Action:
+                  - "dynamodb:ExportTableToPointInTime"
+                Resource:
+                  -  !Sub "${ChatHistoryTable.Arn}"
+              - Sid: "ExportToS3"
+                Effect: "Allow"
+                Action:
+                  - "s3:AbortMultipartUpload"
+                  - "s3:PutObject"
+                  - "s3:PutObjectAcl"
+                Resource:
+                  -  !GetAtt S3BucketForExportDynamoDB.Arn
+                  -  !Sub "${S3BucketForExportDynamoDB.Arn}/*"
+
+  ###################################################
+  ## Schedule Export DynamoDB
+  ###################################################
+  ScheduleExportDynamoDB:
+    Type: "AWS::Scheduler::Schedule"
+    Properties:
+      Name: !Sub "${ApplicationName}-export-dynamodb-eventbridge-schedule"
+      Description: "Start Export DynamoDB"
+      ScheduleExpression: "cron(0 1 * * ? *)"
+      ScheduleExpressionTimezone: "Asia/Tokyo"
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: "ENABLED"
+      Target:
+        Arn: "arn:aws:scheduler:::aws-sdk:dynamodb:exportTableToPointInTime"
+        Input: !Sub |-
+          {
+            "S3Bucket": "${S3BucketForExportDynamoDB}",
+            "TableArn": "${ChatHistoryTable.Arn}"
+          }
+        RoleArn: !GetAtt SchedulerRole.Arn
+
+Outputs:
+
+  S3BucketForAthenaHistory:
+    Description: S3 Bucket for Athena Query Results.
+    Value: !Ref S3BucketForAthenaHistory
+
+  S3BucketForExportDynamoDB:
+    Description: S3 Bucket for DynamoDB Export Results.
+    Value: !Ref S3BucketForExportDynamoDB

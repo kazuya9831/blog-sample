@@ -1,0 +1,15 @@
+{
+    "sample-chat-history-table": [
+        {"PutRequest": {"Item": {"ChatId": {"S": "1"},"ConversationAt": {"N": "1"},"UserId": {"S": "user1"},"Question": {"S": "質問1"},"Answer": {"S": "回答1"},"Feedback": {"S": "Good"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "1"},"ConversationAt": {"N": "2"},"UserId": {"S": "user1"},"Question": {"S": "質問2"},"Answer": {"S": "回答2"},"Feedback": {"S": "Good"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "1"},"ConversationAt": {"N": "3"},"UserId": {"S": "user1"},"Question": {"S": "質問3"},"Answer": {"S": "回答3"},"Feedback": {"S": "Good"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "2"},"ConversationAt": {"N": "1"},"UserId": {"S": "user2"},"Question": {"S": "質問1"},"Answer": {"S": "回答1"},"Feedback": {"S": "Good"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "2"},"ConversationAt": {"N": "2"},"UserId": {"S": "user2"},"Question": {"S": "質問2"},"Answer": {"S": "回答2"},"Feedback": {"S": "Bad"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "3"},"ConversationAt": {"N": "1"},"UserId": {"S": "user3"},"Question": {"S": "質問1"},"Answer": {"S": "回答1"},"Feedback": {"S": "Good"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "3"},"ConversationAt": {"N": "2"},"UserId": {"S": "user3"},"Question": {"S": "質問2"},"Answer": {"S": "回答2"},"Feedback": {"S": "Good"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "3"},"ConversationAt": {"N": "3"},"UserId": {"S": "user3"},"Question": {"S": "質問3"},"Answer": {"S": "回答3"},"Feedback": {"S": "Bad"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "3"},"ConversationAt": {"N": "4"},"UserId": {"S": "user3"},"Question": {"S": "質問4"},"Answer": {"S": "回答4"},"Feedback": {"S": "Good"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "3"},"ConversationAt": {"N": "5"},"UserId": {"S": "user3"},"Question": {"S": "質問5"},"Answer": {"S": "回答5"},"Feedback": {"S": "Bad"}}}},
+        {"PutRequest": {"Item": {"ChatId": {"S": "3"},"ConversationAt": {"N": "6"},"UserId": {"S": "user3"},"Question": {"S": "質問6"},"Answer": {"S": "回答6"},"Feedback": {"S": "Good"}}}}
+    ]
+}
