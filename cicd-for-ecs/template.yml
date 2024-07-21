@@ -44,6 +44,7 @@ Parameters:
   AllowSourceIp:
     Description: "Required. Please specify the Ip to allow access to the ai text search service."
     Type: String
+    Default: 0.0.0.0/0
 
   ProdTrafficPort:
     Description: "Required. Please specify the port for the blue service."
@@ -728,7 +729,7 @@ Resources:
       DeploymentController:
         Type: CODE_DEPLOY
       Cluster: !Ref ECSCluster
-      DesiredCount: 1
+      DesiredCount: 0
       LoadBalancers:
         - TargetGroupArn: !Ref TargetGroup1
           ContainerName: !Sub "${ApplicationName}-container"
