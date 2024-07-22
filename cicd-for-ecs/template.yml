@@ -56,6 +56,11 @@ Parameters:
     Type: Number
     Default: 81
 
+  NumberOfECSService:
+    Description: "Required. Please specify the number of ECS services."
+    Type: Number
+    Default: 0
+
 Resources:
 
   ###################################################
@@ -646,7 +651,7 @@ Resources:
       Port: !Ref TestTrafficPort
       Protocol: HTTP
       DefaultActions:
-        - TargetGroupArn: !Ref 'TargetGroup2'
+        - TargetGroupArn: !Ref 'TargetGroup1'
           Order: 1
           Type: "forward"
 
@@ -729,7 +734,7 @@ Resources:
       DeploymentController:
         Type: CODE_DEPLOY
       Cluster: !Ref ECSCluster
-      DesiredCount: 0
+      DesiredCount: !Ref NumberOfECSService
       LoadBalancers:
         - TargetGroupArn: !Ref TargetGroup1
           ContainerName: !Sub "${ApplicationName}-container"
@@ -813,12 +818,12 @@ Resources:
         DeploymentType: BLUE_GREEN
         DeploymentOption: WITH_TRAFFIC_CONTROL
       BlueGreenDeploymentConfiguration:
+        DeploymentReadyOption:
+          ActionOnTimeout: STOP_DEPLOYMENT
+          WaitTimeInMinutes: 30
         TerminateBlueInstancesOnDeploymentSuccess:
           Action: TERMINATE
-          TerminationWaitTimeInMinutes: 5
-        DeploymentReadyOption:
-          ActionOnTimeout: CONTINUE_DEPLOYMENT
-          WaitTimeInMinutes: 0
+          TerminationWaitTimeInMinutes: 30
       ECSServices:
         - ClusterName: !Ref ECSCluster
           ServiceName: !GetAtt ECSService.Name
