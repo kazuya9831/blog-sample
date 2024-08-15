@@ -1,0 +1,223 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: "CloudFormation template for creating a simple code-server environment."
+
+Parameters:
+  SystemName:
+    Description: "System name of each resources."
+    Type: String
+    Default: "coder"
+
+  InstanceType:
+    Description: "code-serve EC2 instance type."
+    Type: String
+    Default: "t3.micro"
+
+  AMIID:
+    Description: "code-serve EC2 AMI ID"
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64
+
+  SourceIp:
+    Description: "Source IP address for security group."
+    Type: String
+
+  EC2Password:
+    Description: "Source IP address for security group."
+    Type: String
+    Default: "P@ssw0rd"
+    NoEcho: true
+
+Resources:
+
+#####################################################
+# Resources
+#####################################################
+
+  #--------------------------------------------------
+  # VPC
+  #--------------------------------------------------
+
+  DEVENVVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 192.168.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-vpc
+
+  #--------------------------------------------------
+  # PublicSubnet
+  #--------------------------------------------------
+
+  DEVENVPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DEVENVVPC
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: 192.168.0.0/27
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-public-subnet-1a
+
+  #--------------------------------------------------
+  # IGW
+  #--------------------------------------------------
+
+  DEVENVInternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${SystemName}-igw
+
+  DEVENVAttachGateway:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      InternetGatewayId: !Ref DEVENVInternetGateway
+      VpcId: !Ref DEVENVVPC
+
+  #--------------------------------------------------
+  # RouteTable for PublicSubnet
+  #--------------------------------------------------
+
+  DEVENVPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref DEVENVVPC
+      Tags:
+        - Key: Name
+          Value: !Sub rtb-${SystemName}-public-subnet
+
+  DEVENVDefaultPublicRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DEVENVPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref DEVENVInternetGateway
+
+  DEVENVPublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref DEVENVPublicRouteTable
+      SubnetId: !Ref DEVENVPublicSubnet1
+
+  #--------------------------------------------------
+  # Security Group for EC2
+  #--------------------------------------------------
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${SystemName}-sg"
+      GroupDescription: "Allow HTTPS/Flask access"
+      VpcId: !Ref DEVENVVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref SourceIp
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          CidrIp: !Ref SourceIp
+
+  #--------------------------------------------------
+  # IAM Role for EC2
+  #--------------------------------------------------
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${SystemName}-instance-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        - "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+
+  #--------------------------------------------------
+  # Instance Profile
+  #--------------------------------------------------
+
+  EC2InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      InstanceProfileName: !Sub "${SystemName}-instance-role"
+      Path: "/"
+      Roles:
+        - !Ref EC2Role
+
+  #--------------------------------------------------
+  # EC2 instance
+  #--------------------------------------------------
+
+  CodeServerEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AMIID
+      InstanceType: !Ref InstanceType
+      DisableApiTermination: false
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            Encrypted: true
+            VolumeSize: 8
+            VolumeType: gp3
+            DeleteOnTermination: true
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          SubnetId: !Ref DEVENVPublicSubnet1
+          GroupSet:
+            - !Ref SecurityGroup
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Sub "${SystemName}-code-server"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/bash
+
+          echo $HOME
+          export HOME="/root"
+          echo $HOME
+
+          # install code-server service system-wide
+          curl -fsSL https://code-server.dev/install.sh | sh
+
+          # Setup code-server@ec2-user configurations
+          mkdir -p /home/ec2-user/.config/code-server/
+
+          cat << EOF > /home/ec2-user/.config/code-server/config.yaml
+          bind-addr: 0.0.0.0:8080
+          auth: password
+          password: ${EC2Password}
+          cert: true
+          EOF
+
+          chown -R ec2-user:ec2-user /home/ec2-user/.config
+
+          # start and enable code-server
+          systemctl enable --now code-server@ec2-user
+
+          # install git
+          dnf install -y git python-pip
+
+Outputs:
+  CodeServerURL:
+    Description: "CodeServer URL"
+    Value: !Sub http://${CodeServerEC2.PublicIp}:8080
+
+  FlaskURL:
+    Value: !Sub http://${CodeServerEC2.PublicIp}:5000

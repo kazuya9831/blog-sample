@@ -4,7 +4,7 @@ import boto3
 from boto3.dynamodb.types import TypeDeserializer
 
 TABLE_NAME = "TodoTable"
-dynamodb_client = boto3.client("dynamodb")
+dynamodb_client = boto3.client("dynamodb", region_name="ap-northeast-1")
 
 
 def dynamo_to_python(dynamo_object):
