@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Configuration
+      Parameters:
+      - ApplicationName
+      - Enviroment
+      - AllowSourceIp
+
+Parameters:
+  ApplicationName:
+    Description: Please specify the application name of the resource
+    Type: String
+    Default: web-app-on-waf-cloudfront-lambda
+
+  Enviroment:
+    Description: Please specify the environment of the resource
+    Type: String
+    Default: dev
+
+  AllowSourceIp:
+    Description: Required. Please specify the Ip to allow access to the ai text search service.
+    Type: CommaDelimitedList
+
+Resources:
+  IPSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Description: IP Set for allowing specific IP addresses
+      IPAddressVersion: IPV4
+      Scope: CLOUDFRONT
+      Addresses: !Ref AllowSourceIp
+
+  WAFWebACLArn:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub ${ApplicationName}-${Enviroment}-web-acl-for-cloudfront
+      DefaultAction:
+        Block: {}
+      Scope: CLOUDFRONT
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub ${ApplicationName}-${Enviroment}-web-acl-for-cloudfront
+      Rules:
+        - Name: !Sub ${ApplicationName}-${Enviroment}-ip-access-list-rule
+          Priority: 1
+          Action:
+            Allow: {}
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt IPSet.Arn
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: !Sub ${ApplicationName}-${Enviroment}-ip-access-list-rule
+
+Outputs:
+  WAFWebACLArn:
+    Description: The ARN of the WebACL for CloudFront
+    Value: !GetAtt WAFWebACLArn.Arn

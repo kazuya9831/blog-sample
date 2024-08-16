@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Configuration
+      Parameters:
+      - ApplicationName
+      - Enviroment
+      - WAFWebACLArn
+
+Parameters:
+  ApplicationName:
+    Description: Please specify the application name of the resource
+    Type: String
+    Default: web-app-on-waf-cloudfront-lambda
+
+  Enviroment:
+    Description: Please specify the environment of the resource
+    Type: String
+    Default: dev
+
+  WAFWebACLArn:
+    Description: Please specify the WAF WebACL Arn
+    Type: String
+
+Resources:
+
+  ###################################################
+  ## CloudFront OAC
+  ###################################################
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub ${ApplicationName}-${Enviroment}-origin-access-control
+        OriginAccessControlOriginType: lambda
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  ###################################################
+  ## CloudFront
+  ###################################################
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        # DefaultRootObject: "/"
+        WebACLId: !Ref WAFWebACLArn
+        Origins:
+          - DomainName: !Select [2, !Split ["/", !GetAtt LambdaUrl.FunctionUrl]]
+            Id: "LambdaFunctionURLOrigin"
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+            CustomOriginConfig:
+              OriginProtocolPolicy: "https-only"
+              OriginSSLProtocols:
+                - "TLSv1.2"
+        DefaultCacheBehavior:
+          TargetOriginId: LambdaFunctionURLOrigin
+          ViewerProtocolPolicy: "https-only"
+          AllowedMethods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - OPTIONS
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+          ForwardedValues:
+            QueryString: true
+            Cookies:
+              Forward: none
+
+  ###################################################
+  ## Lambda
+  ###################################################
+
+  LambdaLayer:
+    Type: AWS::Serverless::LayerVersion
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LayerName: !Sub ${ApplicationName}-${Enviroment}-lambda-layer
+      Description: Layer description
+      ContentUri: layers
+      CompatibleRuntimes:
+        - python3.11
+    Metadata:
+      BuildMethod: python3.11
+
+  Lambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.11
+      Architectures:
+      - x86_64
+      CodeUri: app
+      FunctionName: !Sub ${ApplicationName}-${Enviroment}-lambda
+      Timeout: 180
+      MemorySize: 4096
+      Handler: run.sh
+      Environment:
+        Variables:
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          TODO_TABLE: !Ref TodoTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TodoTable
+      Layers:
+      - !Ref LambdaLayer
+      - !Sub arn:aws:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:23
+      FunctionUrlConfig:
+        AuthType: AWS_IAM
+
+  CloudFrontPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt Lambda.Arn
+      Action: lambda:InvokeFunctionUrl
+      Principal: cloudfront.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+  ###################################################
+  ## DynamoDB
+  ###################################################
+
+  TodoTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub "${ApplicationName}-${Enviroment}-todo-table"
+      AttributeDefinitions:
+        - AttributeName: TodoID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: TodoID
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+Outputs:
+  LambdaFunctionURL:
+    Description: The FQDN of the Lambda
+    Value: !GetAtt LambdaUrl.FunctionUrl
+
+  CloudFrontDistributionURL:
+    Description: The FQDN of the CloudFront
+    Value: !Sub https://${CloudFrontDistribution.DomainName}

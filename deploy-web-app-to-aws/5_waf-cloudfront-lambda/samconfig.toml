@@ -1,0 +1,16 @@
+version = 0.1
+[default.deploy.parameters]
+stack_name = "web-app-on-waf-cloudfront-lambda"
+resolve_s3 = true
+s3_prefix = "web-app-on-waf-cloudfront-lambda"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+    "ApplicationName=web-app-on-waf-cloudfront-lambda",
+    "Enviroment=dev",
+    "AllowSourceIp=0.0.0.0/1,128.0.0.0/1",
+    "VpcCIDR=192.168.0.0/24",
+    "PublicSubnet1CIDR=192.168.0.0/27",
+    "PublicSubnet2CIDR=192.168.0.32/27"
+]
+image_repositories = []

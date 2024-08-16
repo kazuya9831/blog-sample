@@ -1,0 +1,18 @@
+[
+  {
+    "ParameterKey": "ApplicationName",
+    "ParameterValue": "web-app-on-waf-app-runner"
+  },
+  {
+    "ParameterKey": "Enviroment",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "AllowSourceIp",
+    "ParameterValue": "0.0.0.0/1,128.0.0.0/1"
+  },
+  {
+    "ParameterKey": "RepositoryName",
+    "ParameterValue": "web-app-on-app-runner-ecr-repository"
+  }
+]

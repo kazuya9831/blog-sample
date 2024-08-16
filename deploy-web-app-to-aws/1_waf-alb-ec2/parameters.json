@@ -1,0 +1,34 @@
+[
+    {
+      "ParameterKey": "ApplicationName",
+      "ParameterValue": "web-app-on-waf-alb-ec2"
+    },
+    {
+      "ParameterKey": "Enviroment",
+      "ParameterValue": "dev"
+    },
+    {
+      "ParameterKey": "AllowSourceIp",
+      "ParameterValue": "0.0.0.0/0"
+    },
+    {
+      "ParameterKey": "VpcCIDR",
+      "ParameterValue": "192.168.0.0/24"
+    },
+    {
+      "ParameterKey": "PublicSubnet1CIDR",
+      "ParameterValue": "192.168.0.0/27"
+    },
+    {
+      "ParameterKey": "PublicSubnet2CIDR",
+      "ParameterValue": "192.168.0.32/27"
+    },
+    {
+      "ParameterKey": "ProtectedSubnet1CIDR",
+      "ParameterValue": "192.168.0.64/27"
+    },
+    {
+      "ParameterKey": "ProtectedSubnet2CIDR",
+      "ParameterValue": "192.168.0.96/27"
+    }
+  ]

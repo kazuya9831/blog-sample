@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: Configuration
+      Parameters:
+      - ApplicationName
+      - Enviroment
+      - AllowSourceIp
+      - RepositoryName
+
+Parameters:
+  ApplicationName:
+    Description: Please specify the application name of the resource
+    Type: String
+    Default: web-app-on-waf-app-runner
+
+  Enviroment:
+    Description: Please specify the environment of the resource
+    Type: String
+    Default: dev
+
+  AllowSourceIp:
+    Description: Required. Please specify the Ip to allow access to the ai text search service.
+    Type: CommaDelimitedList
+
+  RepositoryName:
+    Description: The URL of the ECR repository
+    Type: String
+
+Resources:
+
+  ###################################################
+  ## WAF IP Set
+  ###################################################
+
+  IPSet:
+    Type: AWS::WAFv2::IPSet
+    Properties:
+      Name: !Sub ${ApplicationName}-${Enviroment}-ip-set
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses: !Ref AllowSourceIp
+
+  ###################################################
+  ## WAF
+  ###################################################
+  WebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub ${ApplicationName}-${Enviroment}-web-acl
+      DefaultAction:
+        Allow: {}
+      Scope: REGIONAL
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub ${ApplicationName}-${Enviroment}-web-acl
+      Rules:
+        -
+          Name: CUSTOM-BlockFromIpSet
+          Priority: 1
+          Action:
+            Block: {}
+          Statement:
+            NotStatement:
+              Statement:
+                IPSetReferenceStatement:
+                  Arn: !GetAtt IPSet.Arn
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: CUSTOM-BlockFromIpSet
+        -
+          Name: AWS-AWSManagedRulesCommonRuleSet
+          Priority: 2
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            CloudWatchMetricsEnabled: true
+            SampledRequestsEnabled: true
+            MetricName:  AWS-AWSManagedRulesCommonRuleSet
+
+  ###################################################
+  ## Web ACL Association for WAF
+  ###################################################
+  WebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !GetAtt AppRunnerService.ServiceArn
+      WebACLArn: !GetAtt WebACL.Arn
+
+  ###################################################
+  ## App Runner Service
+  ###################################################
+
+  AppRunnerService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: !Sub ${ApplicationName}-${Enviroment}-service
+      SourceConfiguration:
+        AuthenticationConfiguration:
+          AccessRoleArn: !GetAtt AppRunnerBuildRole.Arn
+        AutoDeploymentsEnabled: true
+        ImageRepository:
+          ImageIdentifier: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${RepositoryName}:latest"
+          ImageRepositoryType: ECR
+          ImageConfiguration:
+            Port: 8000
+            RuntimeEnvironmentVariables:
+              - Name: TODO_TABLE
+                Value: !Ref TodoTable
+      InstanceConfiguration:
+        Cpu: 1 vCPU
+        Memory: 2 GB
+        InstanceRoleArn: !GetAtt AppRunnerTasksRole.Arn
+
+  ###################################################
+  ## IAM for App Runner Build Role
+  ###################################################
+
+  AppRunnerBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ApplicationName}-${Enviroment}-app-runner-build-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - build.apprunner.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  ###################################################
+  ## IAM for App Runner Tasks Role
+  ###################################################
+
+  AppRunnerTasksRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${ApplicationName}-${Enviroment}-app-runner-tasks-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'tasks.apprunner.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: !Sub '${ApplicationName}-${Enviroment}-app-runner-tasks-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: "DynamoDBScopedAccess"
+                Effect: "Allow"
+                Action:
+                  - "dynamodb:*"
+                Resource:
+                  - !GetAtt TodoTable.Arn
+
+  ###################################################
+  ## DynamoDB
+  ###################################################
+
+  TodoTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Sub "${ApplicationName}-${Enviroment}-todo-table"
+      AttributeDefinitions:
+        - AttributeName: TodoID
+          AttributeType: S
+      KeySchema:
+        - AttributeName: TodoID
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+Outputs:
+  AppRunnerServiceUrl:
+    Description: The FQDN of the ALB
+    Value: !GetAtt AppRunnerService.ServiceUrl
