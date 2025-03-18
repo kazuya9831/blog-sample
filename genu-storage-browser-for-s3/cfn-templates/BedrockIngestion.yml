@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  DataSourceId:
+    Type: String
+    Description: The ID of the data source
+  KnowledgeBaseId:
+    Type: String
+    Description: The ID of the knowledge base
+  ScheduleExpression:
+    Type: String
+    Description: The cron expression for scheduling the ingestion job (e.g., cron(0 0 * * ? *))
+    Default: cron(0 0 * * ? *)  # デフォルト値を設定（毎日午前0時）
+
+Resources:
+  SchedulerBedrockIngestionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - scheduler.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: SchedulerBedrockIngestionJobPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock-agent:start-ingestion-job"
+                Resource:
+                  - "*"
+
+  ScheduleBedrockIngestionJob:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: Bedrock-IngestionJob-Schedule
+      Description: Trigger Bedrock Ingestion Job
+      ScheduleExpression: !Ref ScheduleExpression  # パラメータとして受け取ったスケジュール式を使用
+      ScheduleExpressionTimezone: Japan
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED
+      Target:
+        Arn: arn:aws:scheduler:::aws-sdk:bedrockagent:startIngestionJob
+        Input: !Sub |-
+          {
+            "DataSourceId": "${DataSourceId}",
+            "KnowledgeBaseId": "${KnowledgeBaseId}"
+          }
+        RoleArn: !GetAtt SchedulerBedrockIngestionRole.Arn
