@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  ApplicationName:
+    Description: Please specify the application name of the resource
+    Type: String
+    Default: sample
+
+  SleepTime:
+    Description: Please specify the sleep time for the ECS task
+    Type: Number
+    Default: 3600
+
+Resources:
+
+  ###################################################
+  ## CloudWatch Logs for ECS
+  ###################################################
+
+  EcsLogs:
+    Type: 'AWS::Logs::LogGroup'
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/ecs/${ApplicationName}-ecs-task"
+      RetentionInDays: 7
+
+  EcsExecLogs:
+    Type: 'AWS::Logs::LogGroup'
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/ecs/${ApplicationName}-ecs-exec"
+      RetentionInDays: 7
+
+  S3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub ecs-exec-logs-${AWS::AccountId}
+
+  ###################################################
+  ## IAM for ECS TaskExecutionRole
+  ###################################################
+
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ApplicationName}-ecs-task-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ###################################################
+  ## IAM for ECS ServiceRole
+  ###################################################
+
+  EcsTaskRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub '${ApplicationName}-ecs-task-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service:
+                - 'ecs-tasks.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+        - PolicyName: !Sub '${ApplicationName}-ecs-service-policy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: "SSMMessageScopedAccess"
+                Effect: "Allow"
+                Action:
+                  - "ssmmessages:CreateControlChannel"
+                  - "ssmmessages:CreateDataChannel"
+                  - "ssmmessages:OpenControlChannel"
+                  - "ssmmessages:OpenDataChannel"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - logs:DescribeLogGroups
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                Resource:
+                  - !GetAtt EcsLogs.Arn
+                  - !GetAtt EcsExecLogs.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - s3:GetEncryptionConfiguration
+                Resource: !GetAtt S3Bucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub "${S3Bucket.Arn}/*"
+
+  ECSCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: !Sub "${ApplicationName}-ecs-cluster"
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: OVERRIDE
+          LogConfiguration:
+            CloudWatchLogGroupName: !Ref EcsExecLogs
+            S3BucketName: !Ref S3Bucket
+
+  ECSTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ContainerDefinitions:
+        - Name: !Sub "${ApplicationName}-container"
+          Image: ubuntu:latest
+          Essential: true
+          Command:
+            - "sh"
+            - "-c"
+            - "sleep $SLEEP_TIME"
+          LinuxParameters:
+            InitProcessEnabled: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref EcsLogs
+              awslogs-stream-prefix: !Sub "${ApplicationName}-container"
+              awslogs-region: !Sub ${AWS::Region}
+          Environment:
+            - Name: SLEEP_TIME
+              Value: !Ref SleepTime
+      Family: !Sub "${ApplicationName}-task-definition"
+      Cpu: 256
+      Memory: 512
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: ARM64

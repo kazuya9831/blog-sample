@@ -1,0 +1,10 @@
+[
+    {
+        "ParameterKey": "ApplicationName",
+        "ParameterValue": "sample"
+    },
+    {
+        "ParameterKey": "SleepTime",
+        "ParameterValue": "3600"
+    }
+]
